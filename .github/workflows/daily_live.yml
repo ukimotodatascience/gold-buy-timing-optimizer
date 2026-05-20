@@ -68,6 +68,7 @@ jobs:
           import os
           from pathlib import Path
           from urllib import request
+          from urllib.error import HTTPError, URLError
 
           import pandas as pd
 
@@ -161,8 +162,15 @@ jobs:
               headers={"Content-Type": "application/json"},
               method="POST",
           )
-          with request.urlopen(req) as resp:
-              print(f"Discord webhook sent. status={resp.status}")
+          try:
+              with request.urlopen(req) as resp:
+                  print(f"Discord webhook sent. status={resp.status}")
+          except HTTPError as e:
+              print(f"Warning: Discord webhook failed with HTTPError: {e.code} {e.reason}. Continue workflow.")
+          except URLError as e:
+              print(f"Warning: Discord webhook failed with URLError: {e.reason}. Continue workflow.")
+          except Exception as e:
+              print(f"Warning: Discord webhook failed with unexpected error: {e}. Continue workflow.")
           PY
 
       - name: Upload live artifacts
