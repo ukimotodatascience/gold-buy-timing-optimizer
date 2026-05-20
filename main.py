@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 from datetime import date, datetime
-from typing import Iterable, NamedTuple, cast
+from typing import NamedTuple, cast
 
 import numpy as np
 import pandas as pd
@@ -354,7 +354,6 @@ def main() -> None:
     )
 
     x_valid = x.loc[valid]
-    y_price_valid = y_price.loc[valid]
     y_month_rank_valid = y_month_rank.loc[valid]
     y_future_lower_valid = y_future_lower.loc[valid].astype(int)
     date_valid = dates.loc[valid]

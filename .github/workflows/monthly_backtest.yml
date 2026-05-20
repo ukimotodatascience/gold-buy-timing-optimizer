@@ -19,6 +19,8 @@ on:
 jobs:
   run-monthly-backtest:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
@@ -89,3 +91,108 @@ jobs:
           name: monthly-backtest-${{ github.run_id }}
           path: |
             data/backtest/*.csv
+
+      - name: Send monthly backtest summary to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TRAIN_END: ${{ steps.range.outputs.train_end }}
+          TEST_START: ${{ steps.range.outputs.test_start }}
+          TEST_END: ${{ steps.range.outputs.test_end }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from urllib import request
+
+          import pandas as pd
+
+          webhook = os.environ.get("DISCORD_WEBHOOK_URL")
+          if not webhook:
+              print("DISCORD_WEBHOOK_URL is not set. Skip Discord notification.")
+              raise SystemExit(0)
+
+          base = Path("data/backtest")
+          metrics_files = sorted(base.glob("*_metrics.csv"), key=lambda p: p.stat().st_mtime)
+          cls_files = sorted(base.glob("*_classification_predictions.csv"), key=lambda p: p.stat().st_mtime)
+          rank_files = sorted(base.glob("*_month_rank_regression_predictions.csv"), key=lambda p: p.stat().st_mtime)
+
+          if not metrics_files or not cls_files or not rank_files:
+              print("Backtest output files are missing. Skip Discord notification.")
+              raise SystemExit(0)
+
+          metrics_path = metrics_files[-1]
+          cls_path = cls_files[-1]
+          rank_path = rank_files[-1]
+
+          metrics_df = pd.read_csv(metrics_path)
+          cls_df = pd.read_csv(cls_path)
+          rank_df = pd.read_csv(rank_path)
+
+          n_days = len(cls_df)
+          month_low_prob = (1.0 - cls_df["pred_prob_y_future_lower"]).astype(float)
+          pred_rank = rank_df["pred_month_rank"].astype(float)
+
+          avg_prob_month_low = float(month_low_prob.mean()) if n_days > 0 else float("nan")
+          min_prob_month_low = float(month_low_prob.min()) if n_days > 0 else float("nan")
+          max_prob_month_low = float(month_low_prob.max()) if n_days > 0 else float("nan")
+          std_prob_month_low = float(month_low_prob.std(ddof=0)) if n_days > 0 else float("nan")
+
+          avg_pred_rank = float(pred_rank.mean()) if len(pred_rank) > 0 else float("nan")
+          min_pred_rank = float(pred_rank.min()) if len(pred_rank) > 0 else float("nan")
+          max_pred_rank = float(pred_rank.max()) if len(pred_rank) > 0 else float("nan")
+          std_pred_rank = float(pred_rank.std(ddof=0)) if len(pred_rank) > 0 else float("nan")
+
+          reg = metrics_df[metrics_df["task"] == "regression_month_rank"]
+          clf = metrics_df[metrics_df["task"] == "classification_month_low"]
+
+          metric_lines = []
+          if not reg.empty:
+              metric_lines.append(
+                  f"回帰: RMSE={float(reg.iloc[0]['rmse']):.4f}, MAE={float(reg.iloc[0]['mae']):.4f}"
+              )
+          if not clf.empty:
+              acc = float(clf.iloc[0]["accuracy"])
+              roc_auc = clf.iloc[0].get("roc_auc")
+              if pd.notna(roc_auc):
+                  metric_lines.append(f"分類: ACC={acc:.4f}, ROC-AUC={float(roc_auc):.4f}")
+              else:
+                  metric_lines.append(f"分類: ACC={acc:.4f}, ROC-AUC=NaN")
+
+          content_lines = [
+              "📊 **月次バックテスト結果**",
+              f"対象期間: `{os.environ['TEST_START']}` 〜 `{os.environ['TEST_END']}`",
+              f"学習終了日: `{os.environ['TRAIN_END']}`",
+              "",
+              "【サマリ】",
+              f"- 評価日数: `{n_days}` 日",
+              f"- 「今日が月内安値」確率: 平均 `{avg_prob_month_low:.2%}` / 最小 `{min_prob_month_low:.2%}` / 最大 `{max_prob_month_low:.2%}` / 標準偏差 `{std_prob_month_low:.2%}`",
+              f"- 月内順位予測（1が最安）: 平均 `{avg_pred_rank:.2f}`位 / 最小 `{min_pred_rank:.2f}`位 / 最大 `{max_pred_rank:.2f}`位 / 標準偏差 `{std_pred_rank:.2f}`",
+          ]
+          if metric_lines:
+              content_lines.extend([
+                  "",
+                  "【評価指標】",
+                  f"- {' / '.join(metric_lines)}",
+              ])
+
+          payload = {"content": "\n".join(content_lines)}
+          data = json.dumps(payload).encode("utf-8")
+          req = request.Request(
+              webhook,
+              data=data,
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+          with request.urlopen(req) as resp:
+              print(f"Discord webhook sent. status={resp.status}")
+          PY
+
+      - name: Commit monthly backtest csv files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/backtest/*.csv data/close_prices.csv data/volumes.csv data/features.csv data/target.csv data/dataset_all.csv data/dataset_train.csv
+          git diff --cached --quiet || git commit -m "chore: monthly backtest and data update"
+          git pull --rebase origin "${GITHUB_REF_NAME}" || true
+          git push

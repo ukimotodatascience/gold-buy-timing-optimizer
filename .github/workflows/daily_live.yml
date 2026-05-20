@@ -2,8 +2,8 @@ name: Daily Data Update and Live Prediction
 
 on:
   schedule:
-    # JST 08:15 (UTC 23:15 previous day), Mon-Fri
-    - cron: "15 23 * * 1-5"
+    # JST 05:00 daily (UTC 20:00 previous day)
+    - cron: "0 20 * * *"
   workflow_dispatch:
 
 jobs:
@@ -107,6 +107,16 @@ jobs:
           pred_prob_month_low = float(cls_row.get("pred_prob_today_is_month_low", float("nan")))
           pred_cls = int(cls_row.get("pred_y_future_lower", 0))
 
+          if pred_prob_month_low >= 0.70:
+              icon = "🟢"
+              judgment = "買い優位（強）"
+          elif pred_prob_month_low >= 0.45:
+              icon = "🟡"
+              judgment = "中立〜様子見"
+          else:
+              icon = "🔴"
+              judgment = "買い非推奨"
+
           metric_lines = []
           if not metrics_df.empty and "task" in metrics_df.columns:
               reg = metrics_df[metrics_df["task"] == "regression_month_rank"]
@@ -123,16 +133,25 @@ jobs:
                   )
 
           content_lines = [
-              "📈 **Gold Buy Timing - Daily Live Prediction**",
-              f"- predict_date: `{predict_date}`",
-              f"- asof_date: `{asof_date}`",
-              f"- 回帰（pred_month_rank）: `{pred_month_rank:.4f}`",
-              f"- 分類（pred_y_future_lower）: `{pred_cls}`",
-              f"- Pr(y_future_lower=1): `{pred_prob_lower:.4%}`",
-              f"- Pr(today_is_month_low): `{pred_prob_month_low:.4%}`",
+              f"{icon} **金ETF 買いタイミング予測（日次）**",
+              f"対象日: `{predict_date}`",
+              f"学習基準日(asof): `{asof_date}`",
+              "",
+              "【結論】",
+              f"- 今日が月内安値である確率: `{pred_prob_month_low:.2%}`",
+              f"- 判定: `{judgment}`",
+              "",
+              "【モデル出力】",
+              f"- 月内順位予測（1が最安）: `{pred_month_rank:.2f}`位",
+              f"- 「この先さらに安い日が来る」確率: `{pred_prob_lower:.2%}`",
+              f"- 分類予測ラベル（y_future_lower）: `{pred_cls}`",
           ]
           if metric_lines:
-              content_lines.append("- metrics: " + " / ".join(metric_lines))
+              content_lines.extend([
+                  "",
+                  "【参考（直近精度）】",
+                  f"- {' / '.join(metric_lines)}",
+              ])
 
           payload = {"content": "\n".join(content_lines)}
           data = json.dumps(payload).encode("utf-8")
