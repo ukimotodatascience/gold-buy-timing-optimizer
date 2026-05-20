@@ -1,0 +1,91 @@
+name: Monthly Backtest
+
+on:
+  schedule:
+    # JST 09:00 on the 1st day of each month (UTC 00:00)
+    - cron: "0 0 1 * *"
+  workflow_dispatch:
+    inputs:
+      train_end:
+        description: "Train end date (YYYY-MM-DD). If omitted, use previous month end."
+        required: false
+      test_start:
+        description: "Test start date (YYYY-MM-DD). If omitted, use previous month start."
+        required: false
+      test_end:
+        description: "Test end date (YYYY-MM-DD). If omitted, use previous month end."
+        required: false
+
+jobs:
+  run-monthly-backtest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy scikit-learn yfinance
+
+      - name: Incremental data update
+        run: python incremental_update_data.py
+
+      - name: Resolve backtest date range
+        id: range
+        env:
+          INPUT_TRAIN_END: ${{ github.event.inputs.train_end }}
+          INPUT_TEST_START: ${{ github.event.inputs.test_start }}
+          INPUT_TEST_END: ${{ github.event.inputs.test_end }}
+        run: |
+          python - <<'PY'
+          import os
+          from datetime import date, timedelta
+
+          def month_start(d: date) -> date:
+              return d.replace(day=1)
+
+          def prev_month_end(d: date) -> date:
+              return month_start(d) - timedelta(days=1)
+
+          today = date.today()
+          prev_end = prev_month_end(today)
+          prev_start = prev_end.replace(day=1)
+          train_end_default = prev_start - timedelta(days=1)
+
+          train_end = os.environ.get("INPUT_TRAIN_END") or train_end_default.isoformat()
+          test_start = os.environ.get("INPUT_TEST_START") or prev_start.isoformat()
+          test_end = os.environ.get("INPUT_TEST_END") or prev_end.isoformat()
+
+          out = os.environ["GITHUB_OUTPUT"]
+          with open(out, "a", encoding="utf-8") as f:
+              f.write(f"train_end={train_end}\n")
+              f.write(f"test_start={test_start}\n")
+              f.write(f"test_end={test_end}\n")
+
+          print(f"train_end={train_end}")
+          print(f"test_start={test_start}")
+          print(f"test_end={test_end}")
+          PY
+
+      - name: Run monthly backtest
+        run: |
+          python main.py \
+            --mode monthly_backtest \
+            --train-end "${{ steps.range.outputs.train_end }}" \
+            --test-start "${{ steps.range.outputs.test_start }}" \
+            --test-end "${{ steps.range.outputs.test_end }}" \
+            --n-estimators 50
+
+      - name: Upload backtest artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: monthly-backtest-${{ github.run_id }}
+          path: |
+            data/backtest/*.csv

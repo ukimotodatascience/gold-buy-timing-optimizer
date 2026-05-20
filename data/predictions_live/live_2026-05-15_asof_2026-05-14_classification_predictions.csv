@@ -1,0 +1,2 @@
+Date,test_month,actual_y_future_lower,pred_prob_y_future_lower,pred_y_future_lower,pred_prob_today_is_month_low
+2026-05-15,2026-05,1,0.6166666666666667,1,0.3833333333333333

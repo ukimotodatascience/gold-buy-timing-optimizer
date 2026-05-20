@@ -1,0 +1,166 @@
+name: Daily Data Update and Live Prediction
+
+on:
+  schedule:
+    # JST 08:15 (UTC 23:15 previous day), Mon-Fri
+    - cron: "15 23 * * 1-5"
+  workflow_dispatch:
+
+jobs:
+  run-daily:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy scikit-learn yfinance
+
+      - name: Incremental data update
+        run: python incremental_update_data.py
+
+      - name: Compute asof/predict dates from dataset_train
+        id: dates
+        run: |
+          python - <<'PY'
+          import os
+          import pandas as pd
+          from pathlib import Path
+
+          p = Path("data/dataset_train.csv")
+          df = pd.read_csv(p)
+          df["Date"] = pd.to_datetime(df["Date"])
+          max_date = df["Date"].max().date()
+          print(f"asof_date={max_date}")
+          print(f"predict_date={max_date}")
+          github_output = os.environ["GITHUB_OUTPUT"]
+          with open(github_output, "a", encoding="utf-8") as f:
+              f.write(f"asof_date={max_date}\n")
+              f.write(f"predict_date={max_date}\n")
+          PY
+
+      - name: Run live prediction
+        run: |
+          python main.py \
+            --mode live \
+            --asof-date "${{ steps.dates.outputs.asof_date }}" \
+            --predict-date "${{ steps.dates.outputs.predict_date }}" \
+            --n-estimators 50
+
+      - name: Send live prediction summary to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          ASOF_DATE: ${{ steps.dates.outputs.asof_date }}
+          PREDICT_DATE: ${{ steps.dates.outputs.predict_date }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from urllib import request
+
+          import pandas as pd
+
+          webhook = os.environ.get("DISCORD_WEBHOOK_URL")
+          if not webhook:
+              print("DISCORD_WEBHOOK_URL is not set. Skip Discord notification.")
+              raise SystemExit(0)
+
+          asof_date = os.environ["ASOF_DATE"]
+          predict_date = os.environ["PREDICT_DATE"]
+          base = Path("data/predictions_live")
+
+          rank_path = base / f"live_{predict_date}_asof_{asof_date}_month_rank_regression_predictions.csv"
+          cls_path = base / f"live_{predict_date}_asof_{asof_date}_classification_predictions.csv"
+          metrics_path = base / f"live_{predict_date}_asof_{asof_date}_metrics.csv"
+
+          if not rank_path.exists() or not cls_path.exists():
+              print(f"Prediction files are missing. rank={rank_path.exists()} cls={cls_path.exists()}")
+              raise SystemExit(0)
+
+          rank_df = pd.read_csv(rank_path)
+          cls_df = pd.read_csv(cls_path)
+          metrics_df = pd.read_csv(metrics_path) if metrics_path.exists() else pd.DataFrame()
+
+          rank_row = rank_df[rank_df["Date"] == predict_date]
+          cls_row = cls_df[cls_df["Date"] == predict_date]
+          if rank_row.empty:
+              rank_row = rank_df.tail(1)
+          if cls_row.empty:
+              cls_row = cls_df.tail(1)
+
+          rank_row = rank_row.iloc[-1]
+          cls_row = cls_row.iloc[-1]
+
+          pred_month_rank = float(rank_row.get("pred_month_rank", float("nan")))
+          pred_prob_lower = float(cls_row.get("pred_prob_y_future_lower", float("nan")))
+          pred_prob_month_low = float(cls_row.get("pred_prob_today_is_month_low", float("nan")))
+          pred_cls = int(cls_row.get("pred_y_future_lower", 0))
+
+          metric_lines = []
+          if not metrics_df.empty and "task" in metrics_df.columns:
+              reg = metrics_df[metrics_df["task"] == "regression_month_rank"]
+              clf = metrics_df[metrics_df["task"] == "classification_month_low"]
+              if not reg.empty:
+                  metric_lines.append(
+                      f"回帰: RMSE={float(reg.iloc[0]['rmse']):.4f}, MAE={float(reg.iloc[0]['mae']):.4f}"
+                  )
+              if not clf.empty:
+                  roc_auc = clf.iloc[0].get("roc_auc")
+                  acc = clf.iloc[0].get("accuracy")
+                  metric_lines.append(
+                      f"分類: ACC={float(acc):.4f}, ROC-AUC={float(roc_auc):.4f}" if pd.notna(roc_auc) else f"分類: ACC={float(acc):.4f}, ROC-AUC=NaN"
+                  )
+
+          content_lines = [
+              "📈 **Gold Buy Timing - Daily Live Prediction**",
+              f"- predict_date: `{predict_date}`",
+              f"- asof_date: `{asof_date}`",
+              f"- 回帰（pred_month_rank）: `{pred_month_rank:.4f}`",
+              f"- 分類（pred_y_future_lower）: `{pred_cls}`",
+              f"- Pr(y_future_lower=1): `{pred_prob_lower:.4%}`",
+              f"- Pr(today_is_month_low): `{pred_prob_month_low:.4%}`",
+          ]
+          if metric_lines:
+              content_lines.append("- metrics: " + " / ".join(metric_lines))
+
+          payload = {"content": "\n".join(content_lines)}
+          data = json.dumps(payload).encode("utf-8")
+          req = request.Request(
+              webhook,
+              data=data,
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+          with request.urlopen(req) as resp:
+              print(f"Discord webhook sent. status={resp.status}")
+          PY
+
+      - name: Upload live artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-predictions-${{ github.run_id }}
+          path: |
+            data/predictions_live/*.csv
+            data/dataset_train.csv
+            data/features.csv
+            data/target.csv
+
+      - name: Commit updated data files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/close_prices.csv data/volumes.csv data/features.csv data/target.csv data/dataset_all.csv data/dataset_train.csv
+          git diff --cached --quiet || git commit -m "chore: daily incremental data update"
+          git pull --rebase origin "${GITHUB_REF_NAME}" || true
+          git push
