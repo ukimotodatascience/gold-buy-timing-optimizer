@@ -57,9 +57,10 @@ jobs:
             --predict-date "${{ steps.dates.outputs.predict_date }}" \
             --n-estimators 50
 
-      - name: Send live prediction summary to Discord
+      - name: Send live prediction summary to LINE
         env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           ASOF_DATE: ${{ steps.dates.outputs.asof_date }}
           PREDICT_DATE: ${{ steps.dates.outputs.predict_date }}
         run: |
@@ -72,9 +73,10 @@ jobs:
 
           import pandas as pd
 
-          webhook = os.environ.get("DISCORD_WEBHOOK_URL")
-          if not webhook:
-              print("DISCORD_WEBHOOK_URL is not set. Skip Discord notification.")
+          line_user_id = os.environ.get("LINE_USER_ID")
+          line_token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
+          if not line_user_id or not line_token:
+              print("LINE_USER_ID or LINE_CHANNEL_ACCESS_TOKEN is not set. Skip LINE notification.")
               raise SystemExit(0)
 
           asof_date = os.environ["ASOF_DATE"]
@@ -154,23 +156,34 @@ jobs:
                   f"- {' / '.join(metric_lines)}",
               ])
 
-          payload = {"content": "\n".join(content_lines)}
+          payload = {
+              "to": line_user_id,
+              "messages": [
+                  {
+                      "type": "text",
+                      "text": "\n".join(content_lines),
+                  }
+              ],
+          }
           data = json.dumps(payload).encode("utf-8")
           req = request.Request(
-              webhook,
+              "https://api.line.me/v2/bot/message/push",
               data=data,
-              headers={"Content-Type": "application/json"},
+              headers={
+                  "Content-Type": "application/json",
+                  "Authorization": f"Bearer {line_token}",
+              },
               method="POST",
           )
           try:
               with request.urlopen(req) as resp:
-                  print(f"Discord webhook sent. status={resp.status}")
+                  print(f"LINE push message sent. status={resp.status}")
           except HTTPError as e:
-              print(f"Warning: Discord webhook failed with HTTPError: {e.code} {e.reason}. Continue workflow.")
+              print(f"Warning: LINE push failed with HTTPError: {e.code} {e.reason}. Continue workflow.")
           except URLError as e:
-              print(f"Warning: Discord webhook failed with URLError: {e.reason}. Continue workflow.")
+              print(f"Warning: LINE push failed with URLError: {e.reason}. Continue workflow.")
           except Exception as e:
-              print(f"Warning: Discord webhook failed with unexpected error: {e}. Continue workflow.")
+              print(f"Warning: LINE push failed with unexpected error: {e}. Continue workflow.")
           PY
 
       - name: Upload live artifacts
