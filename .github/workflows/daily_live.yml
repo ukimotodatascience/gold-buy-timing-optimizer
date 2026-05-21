@@ -136,24 +136,24 @@ jobs:
                   )
 
           content_lines = [
-              f"{icon} **金ETF 買いタイミング予測（日次）**",
-              f"対象日: `{predict_date}`",
-              f"学習基準日(asof): `{asof_date}`",
+              f"{icon} 金ETF 買いタイミング予測（日次）",
+              f"対象日: {predict_date}",
+              f"学習基準日(asof): {asof_date}",
               "",
               "【結論】",
-              f"- 今日が月内安値である確率: `{pred_prob_month_low:.2%}`",
-              f"- 判定: `{judgment}`",
+              f"・今日が月内安値である確率: {pred_prob_month_low:.2%}",
+              f"・判定: {judgment}",
               "",
               "【モデル出力】",
-              f"- 月内順位予測（1が最安）: `{pred_month_rank:.2f}`位",
-              f"- 「この先さらに安い日が来る」確率: `{pred_prob_lower:.2%}`",
-              f"- 分類予測ラベル（y_future_lower）: `{pred_cls}`",
+              f"・月内順位予測（1が最安）: {pred_month_rank:.2f}位",
+              f"・この先さらに安い日が来る確率: {pred_prob_lower:.2%}",
+              f"・分類予測ラベル（y_future_lower）: {pred_cls}",
           ]
           if metric_lines:
               content_lines.extend([
                   "",
                   "【参考（直近精度）】",
-                  f"- {' / '.join(metric_lines)}",
+                  f"・{' / '.join(metric_lines)}",
               ])
 
           payload = {

@@ -163,20 +163,20 @@ jobs:
                   metric_lines.append(f"分類: ACC={acc:.4f}, ROC-AUC=NaN")
 
           content_lines = [
-              "📊 **月次バックテスト結果**",
-              f"対象期間: `{os.environ['TEST_START']}` 〜 `{os.environ['TEST_END']}`",
-              f"学習終了日: `{os.environ['TRAIN_END']}`",
+              "📊 月次バックテスト結果",
+              f"対象期間: {os.environ['TEST_START']} 〜 {os.environ['TEST_END']}",
+              f"学習終了日: {os.environ['TRAIN_END']}",
               "",
               "【サマリ】",
-              f"- 評価日数: `{n_days}` 日",
-              f"- 「今日が月内安値」確率: 平均 `{avg_prob_month_low:.2%}` / 最小 `{min_prob_month_low:.2%}` / 最大 `{max_prob_month_low:.2%}` / 標準偏差 `{std_prob_month_low:.2%}`",
-              f"- 月内順位予測（1が最安）: 平均 `{avg_pred_rank:.2f}`位 / 最小 `{min_pred_rank:.2f}`位 / 最大 `{max_pred_rank:.2f}`位 / 標準偏差 `{std_pred_rank:.2f}`",
+              f"・評価日数: {n_days} 日",
+              f"・今日が月内安値である確率: 平均 {avg_prob_month_low:.2%} / 最小 {min_prob_month_low:.2%} / 最大 {max_prob_month_low:.2%} / 標準偏差 {std_prob_month_low:.2%}",
+              f"・月内順位予測（1が最安）: 平均 {avg_pred_rank:.2f}位 / 最小 {min_pred_rank:.2f}位 / 最大 {max_pred_rank:.2f}位 / 標準偏差 {std_pred_rank:.2f}位",
           ]
           if metric_lines:
               content_lines.extend([
                   "",
                   "【評価指標】",
-                  f"- {' / '.join(metric_lines)}",
+                  f"・{' / '.join(metric_lines)}",
               ])
 
           payload = {
