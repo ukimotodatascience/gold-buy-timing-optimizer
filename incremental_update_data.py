@@ -245,6 +245,11 @@ def main() -> None:
     dataset = features.join(target, how="left")
     train_dataset = dataset.dropna(subset=["y_future_lower"]).copy()
 
+    features.index.name = "Date"
+    target.index.name = "Date"
+    dataset.index.name = "Date"
+    train_dataset.index.name = "Date"
+
     close_merged.to_csv(DATA_DIR / "close_prices.csv", encoding="utf-8-sig")
     vol_merged.to_csv(DATA_DIR / "volumes.csv", encoding="utf-8-sig")
     features.to_csv(DATA_DIR / "features.csv", encoding="utf-8-sig")
