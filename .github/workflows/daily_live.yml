@@ -108,6 +108,7 @@ jobs:
           pred_prob_lower = float(cls_row.get("pred_prob_y_future_lower", float("nan")))
           pred_prob_month_low = float(cls_row.get("pred_prob_today_is_month_low", float("nan")))
           pred_cls = int(cls_row.get("pred_y_future_lower", 0))
+          pred_cls_text = "この先さらに安い日が来そう" if pred_cls == 1 else "これ以上安い日は来にくそう"
           feature_date = cls_row.get("feature_date", rank_row.get("feature_date", asof_date))
           training_data_through = cls_row.get(
               "training_data_through",
@@ -139,7 +140,7 @@ jobs:
               "【モデル出力】",
               f"・月内順位予測（1が最安）: {pred_month_rank:.2f}位",
               f"・この先さらに安い日が来る確率: {pred_prob_lower:.2%}",
-              f"・分類予測ラベル: {pred_cls}",
+              f"・分類予測: {pred_cls_text}",
           ]
 
           payload = {
