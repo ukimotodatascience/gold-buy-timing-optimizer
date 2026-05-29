@@ -240,6 +240,8 @@ def run_live_month_rank_regression(
     x_test: pd.DataFrame,
     y_test: pd.Series,
     test_dates: pd.Series,
+    feature_dates: pd.Series,
+    training_data_through: pd.Timestamp,
     n_estimators: int,
 ) -> tuple[dict, pd.DataFrame]:
     log("[RankRegression] Setup live pipeline")
@@ -270,10 +272,13 @@ def run_live_month_rank_regression(
         "walkforward_folds": 1,
         "rmse": float("nan"),
         "mae": float("nan"),
+        "training_data_through": training_data_through.date().isoformat(),
     }
     pred_df = pd.DataFrame(
         {
             "Date": pd.to_datetime(test_dates.values),
+            "feature_date": pd.to_datetime(feature_dates.values),
+            "training_data_through": training_data_through.date().isoformat(),
             "test_month": test_dates.dt.to_period("M").astype(str).values,
             "actual_month_rank": y_test.values,
             "pred_month_rank": pred_rank,
@@ -383,6 +388,8 @@ def run_live_classification(
     x_test: pd.DataFrame,
     y_test: pd.Series,
     test_dates: pd.Series,
+    feature_dates: pd.Series,
+    training_data_through: pd.Timestamp,
     n_estimators: int,
 ) -> tuple[dict, pd.DataFrame]:
     log("[Classification] Setup live pipeline")
@@ -414,10 +421,13 @@ def run_live_classification(
         "walkforward_folds": 1,
         "accuracy": float("nan"),
         "roc_auc": float("nan"),
+        "training_data_through": training_data_through.date().isoformat(),
     }
     pred_df = pd.DataFrame(
         {
             "Date": pd.to_datetime(test_dates.values),
+            "feature_date": pd.to_datetime(feature_dates.values),
+            "training_data_through": training_data_through.date().isoformat(),
             "test_month": test_dates.dt.to_period("M").astype(str).values,
             "actual_y_future_lower": y_test.values,
             "pred_prob_y_future_lower": pred_prob,
@@ -510,6 +520,20 @@ def main() -> None:
             raise RuntimeError(
                 "Live prediction features are empty. Check whether the previous trading day exists in dataset_all.csv."
             )
+        training_data_through_raw = date_valid.loc[train_idx].max()
+        feature_dates = date_predict.shift(1).loc[test_idx]
+        if pd.isna(training_data_through_raw):
+            raise ValueError("training_data_through is NaT")
+        if feature_dates.isna().any():
+            raise RuntimeError(
+                "Live prediction feature date is empty. Check whether the prediction row has a previous row in dataset_all.csv."
+            )
+        training_data_through = pd.Timestamp(training_data_through_raw)
+        log(
+            f"Live data meaning | feature_date={pd.to_datetime(feature_dates.iloc[0]).date()} "
+            f"training_data_through={training_data_through.date()} "
+            f"prediction_target_date={predict_date.date()}"
+        )
         splits = []
         default_trees = DEFAULT_N_ESTIMATORS_DAILY
         output_dir = LIVE_OUTPUT_DIR
@@ -561,6 +585,8 @@ def main() -> None:
             x_predict.loc[test_idx],
             y_month_rank_predict.loc[test_idx],
             date_predict.loc[test_idx],
+            feature_dates,
+            training_data_through,
             n_estimators,
         )
     else:
@@ -579,6 +605,8 @@ def main() -> None:
             x_predict.loc[test_idx],
             y_future_lower_predict.loc[test_idx],
             date_predict.loc[test_idx],
+            feature_dates,
+            training_data_through,
             n_estimators,
         )
     else:

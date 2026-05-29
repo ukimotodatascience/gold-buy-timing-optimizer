@@ -110,6 +110,13 @@ jobs:
           pred_prob_lower = float(cls_row.get("pred_prob_y_future_lower", float("nan")))
           pred_prob_month_low = float(cls_row.get("pred_prob_today_is_month_low", float("nan")))
           pred_cls = int(cls_row.get("pred_y_future_lower", 0))
+          feature_date = cls_row.get("feature_date", rank_row.get("feature_date", asof_date))
+          training_data_through = cls_row.get(
+              "training_data_through",
+              rank_row.get("training_data_through", asof_date),
+          )
+          feature_date = pd.to_datetime(feature_date).date().isoformat()
+          training_data_through = pd.to_datetime(training_data_through).date().isoformat()
 
           if pred_prob_month_low >= 0.70:
               icon = "🟢"
@@ -138,8 +145,9 @@ jobs:
 
           content_lines = [
               f"{icon} 金ETF 買いタイミング予測（日次）",
-              f"対象日: {predict_date}",
-              f"データ基準日(asof): {asof_date}",
+              f"予測対象日: {predict_date}",
+              f"使用した特徴量の日付: {feature_date}",
+              f"学習データの最新日: {training_data_through}",
               "",
               "【結論】",
               f"・今日が月内安値である確率: {pred_prob_month_low:.2%}",
@@ -148,14 +156,14 @@ jobs:
               "【モデル出力】",
               f"・月内順位予測（1が最安）: {pred_month_rank:.2f}位",
               f"・この先さらに安い日が来る確率: {pred_prob_lower:.2%}",
-              f"・分類予測ラベル（y_future_lower）: {pred_cls}",
+              f"・分類予測ラベル: {pred_cls}",
           ]
           if metric_lines:
               content_lines.extend([
                   "",
                   "【参考（直近精度）】",
-                  f"・{' / '.join(metric_lines)}",
               ])
+              content_lines.extend([f"・{line}" for line in metric_lines])
 
           payload = {
               "to": line_user_id,
