@@ -135,12 +135,12 @@ jobs:
               "",
               "【結論】",
               f"・今日が月内安値である確率: {pred_prob_month_low:.2%}",
+              f"・分類予測: {pred_cls_text}",
               f"・判定: {judgment}",
               "",
               "【モデル出力】",
               f"・月内順位予測（1が最安）: {pred_month_rank:.2f}位",
               f"・この先さらに安い日が来る確率: {pred_prob_lower:.2%}",
-              f"・分類予測: {pred_cls_text}",
           ]
 
           payload = {
