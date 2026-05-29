@@ -19,7 +19,8 @@ from sklearn.metrics import (
 from sklearn.pipeline import Pipeline
 
 
-DATA_PATH = Path("data/dataset_train.csv")
+TRAIN_DATA_PATH = Path("data/dataset_train.csv")
+ALL_DATA_PATH = Path("data/dataset_all.csv")
 OUTPUT_DIR = Path("data")
 LIVE_OUTPUT_DIR = OUTPUT_DIR / "predictions_live"
 BACKTEST_OUTPUT_DIR = OUTPUT_DIR / "backtest"
@@ -233,6 +234,56 @@ def run_month_rank_regression(
     return metrics, pred_df
 
 
+def run_live_month_rank_regression(
+    x_train: pd.DataFrame,
+    y_train: pd.Series,
+    x_test: pd.DataFrame,
+    y_test: pd.Series,
+    test_dates: pd.Series,
+    n_estimators: int,
+) -> tuple[dict, pd.DataFrame]:
+    log("[RankRegression] Setup live pipeline")
+    model = Pipeline(
+        [
+            ("imputer", SimpleImputer(strategy="median")),
+            (
+                "model",
+                RandomForestRegressor(
+                    n_estimators=n_estimators,
+                    random_state=42,
+                    n_jobs=-1,
+                    min_samples_leaf=2,
+                ),
+            ),
+        ]
+    )
+    x_train, x_test, dropped_cols = select_non_all_nan_columns(x_train, x_test)
+    if dropped_cols > 0:
+        log(f"[RankRegression] Live dropped_all_nan_features={dropped_cols}")
+
+    model.fit(x_train, y_train)
+    pred_rank = model.predict(x_test)
+    metrics = {
+        "task": "regression_month_rank",
+        "train_size": len(x_train),
+        "test_size": len(x_test),
+        "walkforward_folds": 1,
+        "rmse": float("nan"),
+        "mae": float("nan"),
+    }
+    pred_df = pd.DataFrame(
+        {
+            "Date": pd.to_datetime(test_dates.values),
+            "test_month": test_dates.dt.to_period("M").astype(str).values,
+            "actual_month_rank": y_test.values,
+            "pred_month_rank": pred_rank,
+        },
+    )
+    pred_df = pred_df.set_index("Date").sort_index()
+    log("[RankRegression] Live completed")
+    return metrics, pred_df
+
+
 def run_classification(
     x: pd.DataFrame,
     y: pd.Series,
@@ -326,6 +377,59 @@ def run_classification(
     return metrics, pred_df
 
 
+def run_live_classification(
+    x_train: pd.DataFrame,
+    y_train: pd.Series,
+    x_test: pd.DataFrame,
+    y_test: pd.Series,
+    test_dates: pd.Series,
+    n_estimators: int,
+) -> tuple[dict, pd.DataFrame]:
+    log("[Classification] Setup live pipeline")
+    model = Pipeline(
+        [
+            ("imputer", SimpleImputer(strategy="median")),
+            (
+                "model",
+                RandomForestClassifier(
+                    n_estimators=n_estimators,
+                    random_state=42,
+                    n_jobs=-1,
+                    min_samples_leaf=2,
+                ),
+            ),
+        ]
+    )
+    x_train, x_test, dropped_cols = select_non_all_nan_columns(x_train, x_test)
+    if dropped_cols > 0:
+        log(f"[Classification] Live dropped_all_nan_features={dropped_cols}")
+
+    model.fit(x_train, y_train)
+    pred_cls = model.predict(x_test)
+    pred_prob = model.predict_proba(x_test)[:, 1]
+    metrics = {
+        "task": "classification_month_low",
+        "train_size": len(x_train),
+        "test_size": len(x_test),
+        "walkforward_folds": 1,
+        "accuracy": float("nan"),
+        "roc_auc": float("nan"),
+    }
+    pred_df = pd.DataFrame(
+        {
+            "Date": pd.to_datetime(test_dates.values),
+            "test_month": test_dates.dt.to_period("M").astype(str).values,
+            "actual_y_future_lower": y_test.values,
+            "pred_prob_y_future_lower": pred_prob,
+            "pred_y_future_lower": pred_cls,
+            "pred_prob_today_is_month_low": 1 - pred_prob,
+        },
+    )
+    pred_df = pred_df.set_index("Date").sort_index()
+    log("[Classification] Live completed")
+    return metrics, pred_df
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -343,11 +447,11 @@ def main() -> None:
     args = parser.parse_args()
 
     log("=== Model training started ===")
-    if not DATA_PATH.exists():
-        raise FileNotFoundError(f"Not found: {DATA_PATH}")
+    if not TRAIN_DATA_PATH.exists():
+        raise FileNotFoundError(f"Not found: {TRAIN_DATA_PATH}")
 
-    log(f"Loading dataset: {DATA_PATH}")
-    df = load_dataset(DATA_PATH)
+    log(f"Loading train dataset: {TRAIN_DATA_PATH}")
+    df = load_dataset(TRAIN_DATA_PATH)
     log(f"Loaded rows={len(df)}, cols={len(df.columns)}")
     x, y_price, y_month_rank, y_future_lower, valid, dates = build_supervised_dataset(
         df
@@ -365,6 +469,19 @@ def main() -> None:
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     if args.mode == "live":
+        if not ALL_DATA_PATH.exists():
+            raise FileNotFoundError(f"Not found: {ALL_DATA_PATH}")
+        log(f"Loading prediction dataset: {ALL_DATA_PATH}")
+        df_predict = load_dataset(ALL_DATA_PATH)
+        (
+            x_predict,
+            y_price_predict,
+            y_month_rank_predict,
+            y_future_lower_predict,
+            _,
+            date_predict,
+        ) = build_supervised_dataset(df_predict)
+
         asof_date = parse_yyyy_mm_dd(args.asof_date, "asof-date")
         if asof_date is None:
             max_date_raw = date_valid.max()
@@ -374,18 +491,26 @@ def main() -> None:
         asof_date = require_timestamp(asof_date, "asof-date")
         predict_date = parse_yyyy_mm_dd(args.predict_date, "predict-date")
         if predict_date is None:
-            predict_date = asof_date + pd.Timedelta(days=1)
+            max_date_raw = date_predict.max()
+            if pd.isna(max_date_raw):
+                raise ValueError("date_predict.max() is NaT")
+            predict_date = pd.Timestamp(max_date_raw)
         predict_date = require_timestamp(predict_date, "predict-date")
-        ensure_date_in_data(predict_date, date_valid, "predict-date")
+        ensure_date_in_data(predict_date, date_predict, "predict-date")
         log(
             f"Mode=live | asof_date={asof_date.date()} predict_date={predict_date.date()}"
         )
-        splits = build_fixed_train_daily_test_splits(
-            date_valid,
-            train_end=asof_date,
-            test_start=predict_date,
-            test_end=predict_date,
-        )
+        train_idx = date_valid.index[date_valid <= asof_date]
+        test_idx = date_predict.index[date_predict == predict_date]
+        if len(train_idx) == 0:
+            raise RuntimeError("No live training rows were generated.")
+        if len(test_idx) == 0:
+            raise RuntimeError("No live prediction row was generated.")
+        if not x_predict.loc[test_idx].notna().any(axis=1).all():
+            raise RuntimeError(
+                "Live prediction features are empty. Check whether the previous trading day exists in dataset_all.csv."
+            )
+        splits = []
         default_trees = DEFAULT_N_ESTIMATORS_DAILY
         output_dir = LIVE_OUTPUT_DIR
         output_prefix = f"live_{predict_date.date()}_asof_{asof_date.date()}"
@@ -423,27 +548,47 @@ def main() -> None:
 
     n_estimators = args.n_estimators or default_trees
     log(f"Config: n_estimators={n_estimators}, folds={len(splits)}")
-    if len(splits) == 0:
+    if args.mode == "monthly_backtest" and len(splits) == 0:
         raise RuntimeError(
             "No valid split was generated. Check date range and whether predict/test dates exist in dataset_train.csv."
         )
 
     log("Run task 1/2: regression_month_rank")
-    rank_metrics, rank_pred = run_month_rank_regression(
-        x_valid,
-        y_month_rank_valid,
-        date_valid,
-        splits,
-        n_estimators,
-    )
+    if args.mode == "live":
+        rank_metrics, rank_pred = run_live_month_rank_regression(
+            x_valid.loc[train_idx],
+            y_month_rank_valid.loc[train_idx],
+            x_predict.loc[test_idx],
+            y_month_rank_predict.loc[test_idx],
+            date_predict.loc[test_idx],
+            n_estimators,
+        )
+    else:
+        rank_metrics, rank_pred = run_month_rank_regression(
+            x_valid,
+            y_month_rank_valid,
+            date_valid,
+            splits,
+            n_estimators,
+        )
     log("Run task 2/2: classification_month_low")
-    cls_metrics, cls_pred = run_classification(
-        x_valid,
-        y_future_lower_valid,
-        date_valid,
-        splits,
-        n_estimators,
-    )
+    if args.mode == "live":
+        cls_metrics, cls_pred = run_live_classification(
+            x_valid.loc[train_idx],
+            y_future_lower_valid.loc[train_idx],
+            x_predict.loc[test_idx],
+            y_future_lower_predict.loc[test_idx],
+            date_predict.loc[test_idx],
+            n_estimators,
+        )
+    else:
+        cls_metrics, cls_pred = run_classification(
+            x_valid,
+            y_future_lower_valid,
+            date_valid,
+            splits,
+            n_estimators,
+        )
 
     metrics_df = pd.DataFrame([rank_metrics, cls_metrics])
     output_dir.mkdir(parents=True, exist_ok=True)

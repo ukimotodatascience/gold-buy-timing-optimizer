@@ -29,7 +29,7 @@ jobs:
       - name: Incremental data update
         run: python incremental_update_data.py
 
-      - name: Compute asof/predict dates from dataset_train
+      - name: Compute asof/predict dates
         id: dates
         run: |
           python - <<'PY'
@@ -37,16 +37,20 @@ jobs:
           import pandas as pd
           from pathlib import Path
 
-          p = Path("data/dataset_train.csv")
-          df = pd.read_csv(p)
-          df["Date"] = pd.to_datetime(df["Date"])
-          max_date = df["Date"].max().date()
-          print(f"asof_date={max_date}")
-          print(f"predict_date={max_date}")
+          train_path = Path("data/dataset_train.csv")
+          all_path = Path("data/dataset_all.csv")
+          train_df = pd.read_csv(train_path)
+          all_df = pd.read_csv(all_path)
+          train_df["Date"] = pd.to_datetime(train_df["Date"])
+          all_df["Date"] = pd.to_datetime(all_df["Date"])
+          asof_date = train_df["Date"].max().date()
+          predict_date = all_df["Date"].max().date()
+          print(f"asof_date={asof_date}")
+          print(f"predict_date={predict_date}")
           github_output = os.environ["GITHUB_OUTPUT"]
           with open(github_output, "a", encoding="utf-8") as f:
-              f.write(f"asof_date={max_date}\n")
-              f.write(f"predict_date={max_date}\n")
+              f.write(f"asof_date={asof_date}\n")
+              f.write(f"predict_date={predict_date}\n")
           PY
 
       - name: Run live prediction
