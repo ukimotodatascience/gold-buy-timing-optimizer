@@ -86,7 +86,6 @@ jobs:
 
           rank_path = base / f"live_{predict_date}_asof_{asof_date}_month_rank_regression_predictions.csv"
           cls_path = base / f"live_{predict_date}_asof_{asof_date}_classification_predictions.csv"
-          metrics_path = base / f"live_{predict_date}_asof_{asof_date}_metrics.csv"
 
           if not rank_path.exists() or not cls_path.exists():
               print(f"Prediction files are missing. rank={rank_path.exists()} cls={cls_path.exists()}")
@@ -94,7 +93,6 @@ jobs:
 
           rank_df = pd.read_csv(rank_path)
           cls_df = pd.read_csv(cls_path)
-          metrics_df = pd.read_csv(metrics_path) if metrics_path.exists() else pd.DataFrame()
 
           rank_row = rank_df[rank_df["Date"] == predict_date]
           cls_row = cls_df[cls_df["Date"] == predict_date]
@@ -128,21 +126,6 @@ jobs:
               icon = "🔴"
               judgment = "買い非推奨"
 
-          metric_lines = []
-          if not metrics_df.empty and "task" in metrics_df.columns:
-              reg = metrics_df[metrics_df["task"] == "regression_month_rank"]
-              clf = metrics_df[metrics_df["task"] == "classification_month_low"]
-              if not reg.empty:
-                  metric_lines.append(
-                      f"回帰: RMSE={float(reg.iloc[0]['rmse']):.4f}, MAE={float(reg.iloc[0]['mae']):.4f}"
-                  )
-              if not clf.empty:
-                  roc_auc = clf.iloc[0].get("roc_auc")
-                  acc = clf.iloc[0].get("accuracy")
-                  metric_lines.append(
-                      f"分類: ACC={float(acc):.4f}, ROC-AUC={float(roc_auc):.4f}" if pd.notna(roc_auc) else f"分類: ACC={float(acc):.4f}, ROC-AUC=NaN"
-                  )
-
           content_lines = [
               f"{icon} 金ETF 買いタイミング予測（日次）",
               f"予測対象日: {predict_date}",
@@ -158,12 +141,6 @@ jobs:
               f"・この先さらに安い日が来る確率: {pred_prob_lower:.2%}",
               f"・分類予測ラベル: {pred_cls}",
           ]
-          if metric_lines:
-              content_lines.extend([
-                  "",
-                  "【参考（直近精度）】",
-              ])
-              content_lines.extend([f"・{line}" for line in metric_lines])
 
           payload = {
               "to": line_user_id,
