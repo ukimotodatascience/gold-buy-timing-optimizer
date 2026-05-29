@@ -37,13 +37,10 @@ jobs:
           import pandas as pd
           from pathlib import Path
 
-          train_path = Path("data/dataset_train.csv")
           all_path = Path("data/dataset_all.csv")
-          train_df = pd.read_csv(train_path)
           all_df = pd.read_csv(all_path)
-          train_df["Date"] = pd.to_datetime(train_df["Date"])
           all_df["Date"] = pd.to_datetime(all_df["Date"])
-          asof_date = train_df["Date"].max().date()
+          asof_date = all_df["Date"].max().date()
           predict_date = all_df["Date"].max().date()
           print(f"asof_date={asof_date}")
           print(f"predict_date={predict_date}")
@@ -142,7 +139,7 @@ jobs:
           content_lines = [
               f"{icon} 金ETF 買いタイミング予測（日次）",
               f"対象日: {predict_date}",
-              f"学習基準日(asof): {asof_date}",
+              f"データ基準日(asof): {asof_date}",
               "",
               "【結論】",
               f"・今日が月内安値である確率: {pred_prob_month_low:.2%}",

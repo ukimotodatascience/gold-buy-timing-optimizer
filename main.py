@@ -484,9 +484,9 @@ def main() -> None:
 
         asof_date = parse_yyyy_mm_dd(args.asof_date, "asof-date")
         if asof_date is None:
-            max_date_raw = date_valid.max()
+            max_date_raw = date_predict.max()
             if pd.isna(max_date_raw):
-                raise ValueError("date_valid.max() is NaT")
+                raise ValueError("date_predict.max() is NaT")
             asof_date = pd.Timestamp(max_date_raw)
         asof_date = require_timestamp(asof_date, "asof-date")
         predict_date = parse_yyyy_mm_dd(args.predict_date, "predict-date")
