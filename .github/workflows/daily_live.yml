@@ -10,11 +10,21 @@ jobs:
   run-daily:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
 
     steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          permission-contents: write
+
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -184,10 +194,12 @@ jobs:
             data/target.csv
 
       - name: Commit updated data files
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/close_prices.csv data/volumes.csv data/features.csv data/target.csv data/dataset_all.csv data/dataset_train.csv
           git diff --cached --quiet || git commit -m "chore: daily incremental data update"
           git pull --rebase origin "${GITHUB_REF_NAME}" || true
-          git push
+          git push "https://x-access-token:${APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${GITHUB_REF_NAME}"
