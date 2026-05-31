@@ -1,0 +1,3 @@
+task,train_size,test_size,walkforward_folds,rmse,mae,accuracy,roc_auc,train_window
+regression_month_rank,2557,19,1,5.490967086878319,4.539382658033974,,,5y
+classification_month_low,2557,19,1,,,0.7894736842105263,0.31666666666666665,5y

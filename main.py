@@ -27,6 +27,7 @@ BACKTEST_OUTPUT_DIR = OUTPUT_DIR / "backtest"
 MIN_TRAIN_MONTHS = 12
 DEFAULT_N_ESTIMATORS_FULL = 400
 DEFAULT_N_ESTIMATORS_DAILY = 120
+DEFAULT_TRAIN_WINDOW_YEARS = 5
 
 
 class Split(NamedTuple):
@@ -93,8 +94,12 @@ def build_fixed_train_daily_test_splits(
     train_end: pd.Timestamp,
     test_start: pd.Timestamp,
     test_end: pd.Timestamp,
+    train_window_years: int | None,
 ) -> list[Split]:
     train_mask = dates <= train_end
+    if train_window_years is not None:
+        train_start = train_end - pd.DateOffset(years=train_window_years)
+        train_mask &= dates >= train_start
     test_mask = (dates >= test_start) & (dates <= test_end)
     train_idx = dates.index[train_mask]
     test_dates = pd.Series(pd.to_datetime(dates.loc[test_mask]).unique()).sort_values()
@@ -151,6 +156,14 @@ def ensure_date_in_data(date_value: pd.Timestamp, dates: pd.Series, name: str) -
             f"{name}={pd.to_datetime(date_value).date()} is not in dataset dates. "
             f"Available range: {min_d} .. {max_d}"
         )
+
+
+def parse_train_window_years(value: int) -> int | None:
+    if value < 0:
+        raise ValueError("train-window-years must be >= 0")
+    if value == 0:
+        return None
+    return value
 
 
 def run_month_rank_regression(
@@ -454,6 +467,12 @@ def main() -> None:
     parser.add_argument("--train-end", type=str, default=None)
     parser.add_argument("--test-start", type=str, default=None)
     parser.add_argument("--test-end", type=str, default=None)
+    parser.add_argument(
+        "--train-window-years",
+        type=int,
+        default=DEFAULT_TRAIN_WINDOW_YEARS,
+        help="Use only recent N years for training. Set 0 to use all history.",
+    )
     args = parser.parse_args()
 
     log("=== Model training started ===")
@@ -477,6 +496,10 @@ def main() -> None:
     )
 
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    train_window_years = parse_train_window_years(args.train_window_years)
+    train_window_label = (
+        f"{train_window_years}y" if train_window_years is not None else "all"
+    )
 
     if args.mode == "live":
         if not ALL_DATA_PATH.exists():
@@ -510,7 +533,11 @@ def main() -> None:
         log(
             f"Mode=live | asof_date={asof_date.date()} predict_date={predict_date.date()}"
         )
-        train_idx = date_valid.index[date_valid <= asof_date]
+        train_mask = date_valid <= asof_date
+        if train_window_years is not None:
+            train_start = asof_date - pd.DateOffset(years=train_window_years)
+            train_mask &= date_valid >= train_start
+        train_idx = date_valid.index[train_mask]
         test_idx = date_predict.index[date_predict == predict_date]
         if len(train_idx) == 0:
             raise RuntimeError("No live training rows were generated.")
@@ -532,6 +559,7 @@ def main() -> None:
         log(
             f"Live data meaning | feature_date={pd.to_datetime(feature_dates.iloc[0]).date()} "
             f"training_data_through={training_data_through.date()} "
+            f"train_window={train_window_label} "
             f"prediction_target_date={predict_date.date()}"
         )
         splits = []
@@ -561,6 +589,7 @@ def main() -> None:
             train_end=train_end,
             test_start=test_start,
             test_end=test_end,
+            train_window_years=train_window_years,
         )
         default_trees = DEFAULT_N_ESTIMATORS_DAILY
         output_dir = BACKTEST_OUTPUT_DIR
@@ -571,7 +600,10 @@ def main() -> None:
         raise ValueError(f"Unsupported mode: {args.mode}")
 
     n_estimators = args.n_estimators or default_trees
-    log(f"Config: n_estimators={n_estimators}, folds={len(splits)}")
+    log(
+        f"Config: n_estimators={n_estimators}, folds={len(splits)}, "
+        f"train_window={train_window_label}"
+    )
     if args.mode == "monthly_backtest" and len(splits) == 0:
         raise RuntimeError(
             "No valid split was generated. Check date range and whether predict/test dates exist in dataset_train.csv."
@@ -619,6 +651,7 @@ def main() -> None:
         )
 
     metrics_df = pd.DataFrame([rank_metrics, cls_metrics])
+    metrics_df["train_window"] = train_window_label
     output_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = output_dir / f"{output_prefix}_metrics.csv"
     rank_path = output_dir / f"{output_prefix}_month_rank_regression_predictions.csv"
