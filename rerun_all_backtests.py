@@ -61,9 +61,7 @@ def load_valid_dates(path: Path) -> pd.Series:
     feature_cols = [c for c in df.columns if c not in drop_cols]
     x = df[feature_cols].shift(1)
     month_key = df["Date"].dt.to_period("M")
-    y_month_rank = df["price"].groupby(month_key).rank(
-        method="average", ascending=True
-    )
+    y_month_rank = df["price"].groupby(month_key).rank(method="average", ascending=True)
     valid = (
         x.notna().any(axis=1)
         & df["price"].notna()
@@ -71,7 +69,11 @@ def load_valid_dates(path: Path) -> pd.Series:
         & df["y_future_lower"].notna()
     )
     dates = (
-        df.loc[valid, "Date"].dropna().sort_values().drop_duplicates().reset_index(drop=True)
+        df.loc[valid, "Date"]
+        .dropna()
+        .sort_values()
+        .drop_duplicates()
+        .reset_index(drop=True)
     )
     if dates.empty:
         raise RuntimeError(f"No dates found in {path}")
