@@ -170,11 +170,15 @@ def append_live_prediction_row(
     df: pd.DataFrame, predict_date: pd.Timestamp
 ) -> pd.DataFrame:
     if (df["Date"] == predict_date).any():
-        return df
+        prediction_df = df
+    else:
+        prediction_row = {col: np.nan for col in df.columns}
+        prediction_row["Date"] = predict_date
+        prediction_df = pd.concat(
+            [df, pd.DataFrame([prediction_row])], ignore_index=True
+        )
 
-    prediction_row = {col: np.nan for col in df.columns}
-    prediction_row["Date"] = predict_date
-    return pd.concat([df, pd.DataFrame([prediction_row])], ignore_index=True)
+    return prediction_df.sort_values("Date").reset_index(drop=True)
 
 
 def parse_train_window_years(value: int) -> int | None:
