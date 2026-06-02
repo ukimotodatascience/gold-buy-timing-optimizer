@@ -50,8 +50,13 @@ jobs:
           all_path = Path("data/dataset_all.csv")
           all_df = pd.read_csv(all_path)
           all_df["Date"] = pd.to_datetime(all_df["Date"])
-          asof_date = all_df["Date"].max().date()
-          predict_date = all_df["Date"].max().date()
+          priced_dates = all_df.loc[all_df["price"].notna(), "Date"]
+          if priced_dates.empty:
+              raise RuntimeError("No priced rows were found in dataset_all.csv")
+          asof_date = priced_dates.max()
+          predict_date = asof_date + pd.Timedelta(days=1)
+          asof_date = asof_date.date()
+          predict_date = predict_date.date()
           print(f"asof_date={asof_date}")
           print(f"predict_date={predict_date}")
           github_output = os.environ["GITHUB_OUTPUT"]
@@ -141,7 +146,7 @@ jobs:
               f"{icon} 金ETF 買いタイミング予測（日次）",
               f"予測対象日: {predict_date}",
               f"使用した特徴量の日付: {feature_date}",
-              f"学習データの最新日: {training_data_through}",
+              f"学習ラベルの最新日: {training_data_through}",
               "",
               "【結論】",
               f"・今日が月内安値である確率: {pred_prob_month_low:.2%}",

@@ -158,6 +158,29 @@ def ensure_date_in_data(date_value: pd.Timestamp, dates: pd.Series, name: str) -
         )
 
 
+def latest_priced_date(df: pd.DataFrame) -> pd.Timestamp:
+    priced_dates = df.loc[df["price"].notna(), "Date"]
+    latest_raw = priced_dates.max()
+    if pd.isna(latest_raw):
+        raise ValueError("No priced rows were found in dataset_all.csv")
+    return pd.Timestamp(latest_raw)
+
+
+def append_live_prediction_row(
+    df: pd.DataFrame, predict_date: pd.Timestamp
+) -> pd.DataFrame:
+    if (df["Date"] == predict_date).any():
+        prediction_df = df
+    else:
+        prediction_row = {col: np.nan for col in df.columns}
+        prediction_row["Date"] = predict_date
+        prediction_df = pd.concat(
+            [df, pd.DataFrame([prediction_row])], ignore_index=True
+        )
+
+    return prediction_df.sort_values("Date").reset_index(drop=True)
+
+
 def parse_train_window_years(value: int) -> int | None:
     if value < 0:
         raise ValueError("train-window-years must be >= 0")
@@ -506,6 +529,16 @@ def main() -> None:
             raise FileNotFoundError(f"Not found: {ALL_DATA_PATH}")
         log(f"Loading prediction dataset: {ALL_DATA_PATH}")
         df_predict = load_dataset(ALL_DATA_PATH)
+        asof_date = parse_yyyy_mm_dd(args.asof_date, "asof-date")
+        if asof_date is None:
+            asof_date = latest_priced_date(df_predict)
+        asof_date = require_timestamp(asof_date, "asof-date")
+        predict_date = parse_yyyy_mm_dd(args.predict_date, "predict-date")
+        if predict_date is None:
+            predict_date = asof_date + pd.Timedelta(days=1)
+        predict_date = require_timestamp(predict_date, "predict-date")
+        ensure_date_in_data(asof_date, df_predict["Date"], "asof-date")
+        df_predict = append_live_prediction_row(df_predict, predict_date)
         (
             x_predict,
             y_price_predict,
@@ -515,20 +548,6 @@ def main() -> None:
             date_predict,
         ) = build_supervised_dataset(df_predict)
 
-        asof_date = parse_yyyy_mm_dd(args.asof_date, "asof-date")
-        if asof_date is None:
-            max_date_raw = date_predict.max()
-            if pd.isna(max_date_raw):
-                raise ValueError("date_predict.max() is NaT")
-            asof_date = pd.Timestamp(max_date_raw)
-        asof_date = require_timestamp(asof_date, "asof-date")
-        predict_date = parse_yyyy_mm_dd(args.predict_date, "predict-date")
-        if predict_date is None:
-            max_date_raw = date_predict.max()
-            if pd.isna(max_date_raw):
-                raise ValueError("date_predict.max() is NaT")
-            predict_date = pd.Timestamp(max_date_raw)
-        predict_date = require_timestamp(predict_date, "predict-date")
         ensure_date_in_data(predict_date, date_predict, "predict-date")
         log(
             f"Mode=live | asof_date={asof_date.date()} predict_date={predict_date.date()}"
